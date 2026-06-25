@@ -7,6 +7,7 @@
 ![Tests](https://img.shields.io/badge/tests-pytest-blueviolet)
 ![Output](https://img.shields.io/badge/output-Markdown%20%2B%20JSON-lightgrey)
 ![Config](https://img.shields.io/badge/config-JSON-informational)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 Export DeepLearning.AI course transcripts, course metadata, resource links, and
 optional lab code to local files. The extractor uses Playwright so it can work
@@ -114,6 +115,8 @@ once.
 ## Notes
 
 - This project is intended for personal study workflows.
+- Source code lives in `src/dlai_study_pack/`, the import package directory for
+  the standard Python `src` layout. It is not an output directory.
 - `exports/`, legacy `outputs/`, and `.auth/` should stay out of git.
 - DeepLearning.AI page structure can change; parser tests use local HTML
   fixtures to keep core behavior stable.

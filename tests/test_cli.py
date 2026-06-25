@@ -2,7 +2,7 @@ import sys
 
 import pytest
 
-from dlai_transcript_extractor.cli import (
+from dlai_study_pack.cli import (
     ConfigError,
     ProgressReporter,
     build_parser,

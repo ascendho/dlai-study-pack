@@ -7,6 +7,7 @@
 ![Tests](https://img.shields.io/badge/tests-pytest-blueviolet)
 ![Output](https://img.shields.io/badge/output-Markdown%20%2B%20JSON-lightgrey)
 ![Config](https://img.shields.io/badge/config-JSON-informational)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 将 DeepLearning.AI 课程字幕、课程元数据、资源列表和可选 lab 代码导出到本地文件。
 工具使用 Playwright 抓取页面，可以处理动态渲染的课程页和需要登录的 lesson。
@@ -95,4 +96,5 @@ exports/<course-slug>/
 ## 说明
 
 - 本项目面向个人学习工作流。
+- 源码位于 `src/dlai_study_pack/`，这是标准 Python `src` layout 下的包目录，不是生成输出目录。
 - DeepLearning.AI 页面结构可能变化；解析器测试使用本地 HTML fixture 来保持核心行为稳定。

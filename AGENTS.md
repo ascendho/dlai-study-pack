@@ -2,10 +2,10 @@
 
 ## Project Structure & Module Organization
 
-Core code lives in `src/dlai_transcript_extractor/`. Keep parsing, fetching,
+Core code lives in `src/dlai_study_pack/`. Keep parsing, fetching,
 crawling, writing, and CLI concerns in separate modules. Tests live in `tests/`
 and should use local HTML strings or fixtures instead of live course pages.
-Generated transcripts belong under `outputs/<course-slug>/`; local browser login
+Generated study packs belong under `exports/<course-slug>/`; local browser login
 state belongs under `.auth/`. Both directories are ignored by git.
 
 ## Build, Test, and Development Commands
@@ -16,20 +16,20 @@ Create an editable development environment:
 python3 -m venv .venv
 . .venv/bin/activate
 python3 -m pip install --upgrade pip
-python3 -m pip install -e ".[browser,dev]"
+python3 -m pip install -e ".[dev]"
 python3 -m playwright install chromium
 ```
 
 Run the extractor:
 
 ```sh
-dlai-transcripts "https://learn.deeplearning.ai/courses/.../lesson/..." --mode hybrid
+dlai-transcripts
 ```
 
 Run checks:
 
 ```sh
-python3 -m py_compile src/dlai_transcript_extractor/*.py
+python3 -m py_compile src/dlai_study_pack/*.py
 python3 -m pytest
 ```
 
@@ -50,14 +50,14 @@ prefer small integration tests guarded by explicit opt-in markers.
 
 ## Commit & Pull Request Guidelines
 
-The current branch has no commit history, so use short imperative messages going
-forward, preferably conventional prefixes such as `feat: crawl full course` or
+Use short imperative commit messages, preferably conventional prefixes such as
+`feat: crawl full course` or
 `fix: preserve lesson order`. Pull requests should describe behavior changes,
-list commands run, and include sample output paths when transcript generation
+list commands run, and include sample output paths when export generation
 changes.
 
 ## Security & Configuration Tips
 
 Do not commit credentials, cookies, or `.auth/` files. Treat fetched HTML as
-untrusted input and never execute page content. Keep generated transcripts out
+untrusted input and never execute page content. Keep generated exports out
 of source changes unless a fixture is intentionally added for testing.
