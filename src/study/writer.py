@@ -225,14 +225,27 @@ def _format_code_assets_section(code_assets):
         "Source: {}".format(_redact_url(code_assets.source_url)),
         "",
         "- Directory: [{}]({}/)".format(label, label),
+    ]
+    lines.extend(_format_code_asset_groups(code_assets))
+    lines.append(
         "- Saved: {}  Skipped: {}  Failed: {}".format(
             code_assets.saved,
             code_assets.skipped,
             code_assets.failed,
-        ),
-    ]
+        )
+    )
     lines.extend("- Error: {}".format(_redact_url(error)) for error in code_assets.errors)
     lines.append("")
+    return lines
+
+
+def _format_code_asset_groups(code_assets):
+    lines = []
+    file_paths = [file.path for file in code_assets.files]
+    for group, label in (("lessons", "Lesson code"), ("project", "Project code")):
+        if any(path == group or path.startswith(group + "/") for path in file_paths):
+            path = "{}/{}".format(_relative_path_label(code_assets.output_dir), group)
+            lines.append("- {}: [{}]({}/)".format(label, path, path))
     return lines
 
 

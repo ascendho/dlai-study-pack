@@ -2,6 +2,8 @@ from pathlib import Path
 
 from .code_assets import (
     BrowserJupyterClient,
+    CODE_GROUP_LESSONS,
+    CODE_GROUP_PROJECT,
     CodeAssetSummary,
     extract_jupyter_lab_links,
     JupyterCodeDownloader,
@@ -26,6 +28,9 @@ from .writer import (
     write_manifest,
     write_resources,
 )
+
+
+PROJECT_CODE_KEYWORDS = ("project", "graded", "assignment")
 
 
 class TranscriptCrawler:
@@ -216,16 +221,18 @@ class TranscriptCrawler:
         seen = set()
 
         for lesson in course_info.lessons:
-            if lesson.kind != "code":
+            group = _code_group_for_lesson(lesson)
+            if group is None:
                 continue
             try:
-                html = html_cache.get(normalize_url(lesson.url)) or self._browser().fetch_page(lesson.url)
-                html_cache[normalize_url(lesson.url)] = html
+                normalized_url = normalize_url(lesson.url)
+                html = html_cache.get(normalized_url) or self._browser().fetch_page(lesson.url)
+                html_cache[normalized_url] = html
             except Exception:
                 continue
 
-            for link in extract_jupyter_lab_links(html, lesson_url=lesson.url):
-                key = (link.url, link.token)
+            for link in extract_jupyter_lab_links(html, lesson_url=lesson.url, group=group):
+                key = (link.url, link.token, link.group)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -280,3 +287,12 @@ class TranscriptCrawler:
     def _emit_progress(self, index, total, status, title):
         if self.progress_callback is not None:
             self.progress_callback(index, total, status, title)
+
+
+def _code_group_for_lesson(lesson):
+    text = " ".join([lesson.kind or "", lesson.title or "", lesson.module_title or ""]).lower()
+    if lesson.kind in {"assignment", "quiz"} or any(keyword in text for keyword in PROJECT_CODE_KEYWORDS):
+        return CODE_GROUP_PROJECT
+    if lesson.kind == "code":
+        return CODE_GROUP_LESSONS
+    return None

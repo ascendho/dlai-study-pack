@@ -29,6 +29,10 @@ SKIP_FILE_NAMES = {
     ".DS_Store",
 }
 
+CODE_GROUP_LESSONS = "lessons"
+CODE_GROUP_PROJECT = "project"
+CODE_GROUPS = {CODE_GROUP_LESSONS, CODE_GROUP_PROJECT}
+
 
 class CodeDownloadError(RuntimeError):
     pass
@@ -58,6 +62,7 @@ class JupyterLabLink:
     url: str
     token: str = ""
     lesson_url: str = ""
+    group: str = CODE_GROUP_LESSONS
 
 
 @dataclass
@@ -132,44 +137,50 @@ class JupyterCodeDownloader:
         summary = CodeAssetSummary(source_url=redact_url(code_url), output_dir=self.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            downloaded = False
-            last_exc = None
-            for source_url, token in self._download_sources(code_url, discovered_links or []):
-                try:
-                    location = parse_jupyter_contents_location(source_url)
-                    root = self._fetch_root(location, token)
-                    self._walk_entry(root, location, summary)
-                    downloaded = True
-                except Exception as exc:
-                    last_exc = exc
-                    if not discovered_links:
-                        raise
-            if not downloaded and last_exc is not None:
-                raise last_exc
-        except Exception as exc:
-            summary.failed += 1
-            summary.errors.append(redact_url(str(exc)))
+        for source_url, token, group in self._download_sources(code_url, discovered_links or []):
+            try:
+                location = parse_jupyter_contents_location(source_url)
+                root = self._fetch_root(location, token)
+                self._walk_entry(root, location, summary, token, group)
+            except Exception as exc:
+                summary.failed += 1
+                summary.errors.append(redact_url(str(exc)))
 
         return summary
 
     def _download_sources(self, code_url, discovered_links):
+        sources = []
+        host_tokens = _host_tokens(discovered_links)
         if self.code_token:
-            sources = [(code_url, self.code_token)]
-            sources.extend((link.url, self.code_token) for link in discovered_links)
-        elif discovered_links:
-            sources = [(link.url, link.token or None) for link in discovered_links]
+            sources.extend(
+                (link.url, self.code_token, _normalize_code_group(link.group))
+                for link in discovered_links
+            )
+            sources.append((code_url, self.code_token, CODE_GROUP_LESSONS))
         else:
-            sources = [(code_url, None)]
+            sources.extend(
+                (link.url, link.token or None, _normalize_code_group(link.group))
+                for link in discovered_links
+            )
+            manual_token = _token_from_url(code_url) or host_tokens.get(urlparse(code_url).netloc)
+            if manual_token or not discovered_links:
+                sources.append((code_url, manual_token, CODE_GROUP_LESSONS))
 
         seen = set()
+        seen_identities = set()
         unique_sources = []
-        for source_url, token in sources:
-            key = (redact_url(source_url), token or "")
+        for source_url, token, group in sources:
+            if not source_url:
+                continue
+            identity = _source_identity(source_url)
+            if group == CODE_GROUP_LESSONS and identity in seen_identities:
+                continue
+            key = (identity, group)
             if key in seen:
                 continue
             seen.add(key)
-            unique_sources.append((source_url, token))
+            seen_identities.add(identity)
+            unique_sources.append((source_url, token, group))
         return unique_sources
 
     def _fetch_root(self, location, token):
@@ -199,13 +210,13 @@ class JupyterCodeDownloader:
 
             return self.client.get_json(api_url)
 
-    def _walk_entry(self, entry, location, summary):
+    def _walk_entry(self, entry, location, summary, token, group):
         entry_type = entry.get("type", "")
         if entry_type == "directory":
-            self._walk_directory(entry, location, summary)
+            self._walk_directory(entry, location, summary, token, group)
             return
         if entry_type in {"file", "notebook"}:
-            self._save_file(entry, location, summary)
+            self._save_file(entry, location, summary, token, group)
             return
 
         path = _relative_remote_path(
@@ -216,13 +227,13 @@ class JupyterCodeDownloader:
         summary.skipped += 1
         summary.files.append(
             CodeAssetFile(
-                path=path,
+                path=_asset_path(group, path),
                 status="skipped",
                 message="unsupported Jupyter content type: {}".format(entry_type or "unknown"),
             )
         )
 
-    def _walk_directory(self, entry, location, summary):
+    def _walk_directory(self, entry, location, summary, token, group):
         name = entry.get("name", "")
         path = _clean_remote_path(entry.get("path", name))
         if _should_skip_directory(path, name):
@@ -230,28 +241,29 @@ class JupyterCodeDownloader:
 
         content = entry.get("content")
         if content is None:
-            entry = self.client.get_json(location.url_for(path, token=self.code_token or None))
+            entry = self.client.get_json(location.url_for(path, token=token))
             content = entry.get("content")
         if content is None:
             raise CodeDownloadError("directory listing is missing content: {}".format(path or "/"))
 
         for child in content:
-            self._walk_entry(child, location, summary)
+            self._walk_entry(child, location, summary, token, group)
 
-    def _save_file(self, entry, location, summary):
+    def _save_file(self, entry, location, summary, token, group):
         name = entry.get("name", "")
         path = _clean_remote_path(entry.get("path", name))
         relative_path = _relative_remote_path(path, location.root_path, name)
+        asset_path = _asset_path(group, relative_path)
 
         if _should_skip_file(relative_path, name):
             return
 
-        output_path = _safe_output_path(self.output_dir, relative_path)
+        output_path = _safe_output_path(self.output_dir / _normalize_code_group(group), relative_path)
         if output_path is None:
             summary.skipped += 1
             summary.files.append(
                 CodeAssetFile(
-                    path=relative_path,
+                    path=asset_path,
                     status="skipped",
                     message="unsafe path",
                 )
@@ -260,12 +272,12 @@ class JupyterCodeDownloader:
 
         if output_path.exists() and not self.force:
             summary.skipped += 1
-            summary.files.append(CodeAssetFile(path=relative_path, status="skipped"))
+            summary.files.append(CodeAssetFile(path=asset_path, status="skipped"))
             return
 
         try:
             if "content" not in entry or entry.get("content") is None:
-                entry = self.client.get_json(location.url_for(path, token=self.code_token or None))
+                entry = self.client.get_json(location.url_for(path, token=token))
             data = _entry_bytes(entry)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(data)
@@ -273,7 +285,7 @@ class JupyterCodeDownloader:
             summary.failed += 1
             summary.files.append(
                 CodeAssetFile(
-                    path=relative_path,
+                    path=asset_path,
                     status="failed",
                     message=str(exc),
                 )
@@ -283,7 +295,7 @@ class JupyterCodeDownloader:
         summary.saved += 1
         summary.files.append(
             CodeAssetFile(
-                path=relative_path,
+                path=asset_path,
                 status="saved",
                 bytes=len(data),
             )
@@ -323,10 +335,11 @@ def parse_jupyter_contents_location(url):
     )
 
 
-def extract_jupyter_lab_links(html, lesson_url=""):
+def extract_jupyter_lab_links(html, lesson_url="", group=CODE_GROUP_LESSONS):
     soup = BeautifulSoup(html, "lxml")
     links = []
     seen = set()
+    group = _normalize_code_group(group)
 
     for iframe in soup.find_all("iframe", src=True):
         src = iframe["src"]
@@ -340,7 +353,7 @@ def extract_jupyter_lab_links(html, lesson_url=""):
         if key in seen:
             continue
         seen.add(key)
-        links.append(JupyterLabLink(tree_url, token=token, lesson_url=lesson_url))
+        links.append(JupyterLabLink(tree_url, token=token, lesson_url=lesson_url, group=group))
 
     return links
 
@@ -438,6 +451,47 @@ def _should_skip_directory(path, name):
 def _should_skip_file(relative_path, name):
     filename = name or PurePosixPath(relative_path).name
     return filename in SKIP_FILE_NAMES
+
+
+def _host_tokens(links):
+    tokens = {}
+    for link in links:
+        token = link.token or _token_from_url(link.url)
+        if not token:
+            continue
+        host = urlparse(link.url).netloc
+        tokens.setdefault(host, token)
+    return tokens
+
+
+def _source_identity(url):
+    try:
+        location = parse_jupyter_contents_location(url)
+    except CodeDownloadError:
+        parsed = urlparse(url)
+        return (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path.rstrip("/"),
+        )
+
+    parsed = urlparse(location.base_url)
+    return (
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path.rstrip("/"),
+        _clean_remote_path(location.root_path),
+    )
+
+
+def _normalize_code_group(group):
+    return group if group in CODE_GROUPS else CODE_GROUP_LESSONS
+
+
+def _asset_path(group, relative_path):
+    relative_path = str(relative_path or "").strip("/")
+    group = _normalize_code_group(group)
+    return "{}/{}".format(group, relative_path) if relative_path else group
 
 
 def _safe_output_path(output_dir, relative_path):

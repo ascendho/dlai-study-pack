@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 from study.code_assets import (
     extract_jupyter_lab_links,
     JupyterCodeDownloader,
+    JupyterLabLink,
     parse_jupyter_contents_location,
     redact_url,
 )
@@ -117,6 +118,7 @@ def test_extract_jupyter_lab_links_from_lesson_iframe():
     )
     assert links[0].token == "secret-token"
     assert links[0].lesson_url == "https://learn.example.test/lesson"
+    assert links[0].group == "lessons"
 
 
 def test_redact_url_removes_token_values():
@@ -193,7 +195,7 @@ def test_downloader_recurses_and_saves_supported_content(tmp_path):
 
     summary = downloader.download("https://lab.example.test/tree/course")
 
-    code_dir = tmp_path / "course-slug" / "code"
+    code_dir = tmp_path / "course-slug" / "code" / "lessons"
     assert (code_dir / "README.md").read_text(encoding="utf-8") == "Course notes\n"
     notebook = json.loads((code_dir / "notebooks" / "demo.ipynb").read_text(encoding="utf-8"))
     assert notebook["nbformat"] == 4
@@ -202,6 +204,7 @@ def test_downloader_recurses_and_saves_supported_content(tmp_path):
     assert summary.saved == 3
     assert summary.skipped == 0
     assert summary.failed == 0
+    assert summary.files[0].path == "lessons/README.md"
     assert client.primed == []
     assert client.requested[0] == "https://lab.example.test/api/contents/course?content=1"
 
@@ -223,7 +226,7 @@ def test_downloader_skips_existing_file_unless_force(tmp_path):
             ],
         }
     }
-    code_dir = tmp_path / "course-slug" / "code"
+    code_dir = tmp_path / "course-slug" / "code" / "lessons"
     code_dir.mkdir(parents=True)
     (code_dir / "app.py").write_text("print('old')\n", encoding="utf-8")
 
@@ -247,6 +250,53 @@ def test_downloader_skips_existing_file_unless_force(tmp_path):
     assert (code_dir / "app.py").read_text(encoding="utf-8") == "print('new')\n"
     assert summary.saved == 1
     assert summary.skipped == 0
+
+
+def test_downloader_saves_project_links_under_project_group(tmp_path):
+    responses = {
+        "https://project-lab.example.test/api/contents/project": {
+            "type": "directory",
+            "name": "project",
+            "path": "project",
+            "content": [
+                {
+                    "type": "file",
+                    "name": "app.py",
+                    "path": "project/app.py",
+                    "format": "text",
+                    "content": "print('project')\n",
+                }
+            ],
+        },
+        "https://manual-lab.example.test/api/contents": {
+            "type": "directory",
+            "name": "",
+            "path": "",
+            "content": [],
+        },
+    }
+    links = [
+        JupyterLabLink(
+            "https://project-lab.example.test/tree/project?token=secret",
+            token="secret",
+            group="project",
+        )
+    ]
+
+    summary = JupyterCodeDownloader(
+        FakeJupyterClient(responses),
+        tmp_path,
+        "course-slug",
+    ).download(
+        "https://manual-lab.example.test/tree",
+        discovered_links=links,
+    )
+
+    assert (tmp_path / "course-slug" / "code" / "project" / "app.py").read_text(
+        encoding="utf-8"
+    ) == "print('project')\n"
+    assert summary.saved == 1
+    assert summary.files[0].path == "project/app.py"
 
 
 def test_downloader_rejects_unsafe_paths(tmp_path):
@@ -313,7 +363,7 @@ def test_downloader_uses_token_for_api_requests(tmp_path):
     assert client.requested == ["https://lab.example.test/api/contents/course?token=secret&content=1"]
 
 
-def test_downloader_uses_discovered_lab_link_before_manual_url(tmp_path):
+def test_downloader_skips_manual_url_without_reusable_token_when_links_are_discovered(tmp_path):
     responses = {
         "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents": {
             "type": "directory",
@@ -321,7 +371,12 @@ def test_downloader_uses_discovered_lab_link_before_manual_url(tmp_path):
             "path": "",
             "content": [],
         },
-        "https://manual-lab.example.test/api/contents": FakeHttpError(403),
+        "https://manual-lab.example.test/api/contents": {
+            "type": "directory",
+            "name": "",
+            "path": "",
+            "content": [],
+        },
     }
     links = extract_jupyter_lab_links(
         """
@@ -341,9 +396,78 @@ def test_downloader_uses_discovered_lab_link_before_manual_url(tmp_path):
 
     assert summary.failed == 0
     assert client.requested == [
-        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents?token=secret&content=1"
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents?token=secret&content=1",
     ]
     assert "secret" not in summary.source_url
+
+
+def test_downloader_skips_bare_manual_url_when_discovered_link_matches_tree(tmp_path):
+    responses = {
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents": {
+            "type": "directory",
+            "name": "",
+            "path": "",
+            "content": [],
+        },
+    }
+    links = extract_jupyter_lab_links(
+        """
+        <iframe src="https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/notebooks/L2/L2.ipynb?token=secret"></iframe>
+        """,
+    )
+    client = FakeJupyterClient(responses)
+
+    summary = JupyterCodeDownloader(
+        client,
+        tmp_path,
+        "course-slug",
+    ).download(
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/tree",
+        discovered_links=links,
+    )
+
+    assert summary.failed == 0
+    assert client.requested == [
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents?token=secret&content=1"
+    ]
+
+
+def test_downloader_reuses_discovered_host_token_for_manual_code_url(tmp_path):
+    responses = {
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents": {
+            "type": "directory",
+            "name": "",
+            "path": "",
+            "content": [],
+        },
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents/course": {
+            "type": "directory",
+            "name": "course",
+            "path": "course",
+            "content": [],
+        },
+    }
+    links = extract_jupyter_lab_links(
+        """
+        <iframe src="https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/notebooks/L2/L2.ipynb?token=secret"></iframe>
+        """,
+    )
+    client = FakeJupyterClient(responses)
+
+    summary = JupyterCodeDownloader(
+        client,
+        tmp_path,
+        "course-slug",
+    ).download(
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/tree/course",
+        discovered_links=links,
+    )
+
+    assert summary.failed == 0
+    assert client.requested == [
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents?token=secret&content=1",
+        "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/api/contents/course?token=secret&content=1",
+    ]
 
 
 def test_downloader_redacts_token_from_source_and_errors(tmp_path):

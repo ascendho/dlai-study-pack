@@ -17,8 +17,8 @@
 - 从课程主页自动发现 lesson 列表。
 - 为每个有字幕的 lesson 保存 Markdown。
 - 自动生成完整学习包：`index.md`、`course-overview.md`、`resources.md`、`manifest.json`。
-- 根据配置中的 Jupyter/Lab 链接递归下载课程代码。
-- 自动从课程 code lesson 的 Jupyter iframe 读取临时 token，通常不需要手动找 token。
+- 根据配置中的 Jupyter/Lab 链接递归下载 lesson 代码。
+- 自动从课程 code、project 或 graded 页面里的 Jupyter iframe 读取临时 token，通常不需要手动找 token。
 - 复用 `.auth/deeplearning_ai.json` 中保存的本地 Playwright 登录态。
 
 ## 安装
@@ -47,7 +47,8 @@ python3 -m playwright install chromium
 ```
 
 `course_url` 是必填项。`code_url` 可以留空；留空时只导出字幕和学习包元数据，不下载
-lab 代码。
+lab 代码。配置中的 `code_url` 会作为 lesson lab 入口处理；project 或 graded lab 会从
+课程页面中自动发现。
 
 ## 运行
 
@@ -67,6 +68,8 @@ exports/<course-slug>/
   transcripts/
     01-<lesson-slug>.md
   code/
+    lessons/
+    project/
   course-overview.md
   resources.md
   manifest.json
@@ -74,7 +77,9 @@ exports/<course-slug>/
 
 - `index.md`：lesson 索引、抓取状态和代码下载摘要。
 - `transcripts/`：逐课字幕 Markdown。
-- `code/`：从 Jupyter/Lab 链接下载的课程代码和资料。
+- `code/`：从 Jupyter/Lab 下载的课程代码和资料。
+- `code/lessons/`：从配置的 `code_url` 或普通 code lesson iframe 下载的 lesson 代码。
+- `code/project/`：从 project、graded 或 assignment 页面 iframe 下载的项目代码；未发现时不会生成内容。
 - `course-overview.md`：课程摘要、学习目标、讲师、lesson 类型和时长。
 - `resources.md`：代码示例、测验或作业页面，以及页面中可见的资源链接。
 - `manifest.json`：结构化课程、lesson、资源和抓取结果数据。
@@ -91,7 +96,7 @@ exports/<course-slug>/
 .auth/deeplearning_ai.json
 ```
 
-正常情况下，工具会从课程 code lesson 的 iframe 里自动读取临时 token。只有课程页面没有暴露 iframe token 时，才需要在项目根目录的 `dlai-transcripts.json` 中添加 `"code_token": "你的 Jupyter token"`，或把 `"browser_visibility"` 改为 `"visible"` 后重新运行一次。
+正常情况下，工具会从课程 code、project 或 graded 页面的 iframe 里自动读取临时 token。只有课程页面没有暴露 iframe token 时，才需要在项目根目录的 `dlai-transcripts.json` 中添加 `"code_token": "你的 Jupyter token"`，或把 `"browser_visibility"` 改为 `"visible"` 后重新运行一次。
 
 ## 说明
 

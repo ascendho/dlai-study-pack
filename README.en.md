@@ -19,9 +19,9 @@ with rendered course pages and authenticated lessons.
 - Save one Markdown transcript per lesson.
 - Always generate the full study pack: `index.md`, `course-overview.md`,
   `resources.md`, and `manifest.json`.
-- Recursively download course code from the configured Jupyter/Lab URL.
-- Automatically read the temporary Jupyter token from course code lesson
-  iframes in normal cases.
+- Recursively download lesson code from the configured Jupyter/Lab URL.
+- Automatically read the temporary Jupyter token from course code, project, or
+  graded page iframes in normal cases.
 - Reuse local Playwright login state from `.auth/deeplearning_ai.json`.
 
 ## Installation
@@ -50,7 +50,9 @@ Edit `dlai-transcripts.json` in the project root:
 ```
 
 `course_url` is required. `code_url` may be empty; when it is empty, the tool
-exports transcripts and study-pack metadata without downloading lab code.
+exports transcripts and study-pack metadata without downloading lab code. The
+configured `code_url` is treated as the lesson lab entry; project or graded labs
+are discovered from course pages.
 
 ## Run
 
@@ -74,6 +76,8 @@ exports/<course-slug>/
   transcripts/
     01-<lesson-slug>.md
   code/
+    lessons/
+    project/
   course-overview.md
   resources.md
   manifest.json
@@ -81,7 +85,11 @@ exports/<course-slug>/
 
 - `index.md`: lesson index, crawl status, and code download summary.
 - `transcripts/`: per-lesson transcript Markdown files.
-- `code/`: course code and materials downloaded from the Jupyter/Lab URL.
+- `code/`: course code and materials downloaded from Jupyter/Lab.
+- `code/lessons/`: lesson code downloaded from the configured `code_url` or
+  regular code lesson iframes.
+- `code/project/`: project code downloaded from project, graded, or assignment
+  page iframes; it remains empty when no project lab is found.
 - `course-overview.md`: course summary, learning objectives, instructors,
   lesson types, and durations.
 - `resources.md`: code examples, quiz or assignment pages, and visible resource
@@ -102,10 +110,11 @@ Playwright browser state needed to reuse an existing web login:
 .auth/deeplearning_ai.json
 ```
 
-In normal cases, the tool reads the temporary token from the course code lesson
-iframe. Only when the course page does not expose an iframe token, add
-`"code_token": "your Jupyter token"` to `dlai-transcripts.json` in the project
-root, or set `"browser_visibility"` to `"visible"` and run the command once.
+In normal cases, the tool reads the temporary token from course code, project,
+or graded page iframes. Only when the course page does not expose an iframe
+token, add `"code_token": "your Jupyter token"` to `dlai-transcripts.json` in
+the project root, or set `"browser_visibility"` to `"visible"` and run the
+command once.
 
 ## Notes
 
