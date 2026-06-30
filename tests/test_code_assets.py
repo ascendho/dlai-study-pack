@@ -50,6 +50,67 @@ class FakeHttpError(RuntimeError):
         super().__init__("GET https://lab.example.test/api/contents?content=1 failed with HTTP {}".format(status))
 
 
+def jupyter_dir(name, path, content):
+    return {
+        "type": "directory",
+        "name": name,
+        "path": path,
+        "content": content,
+    }
+
+
+def jupyter_file(name, path, content):
+    return {
+        "type": "file",
+        "name": name,
+        "path": path,
+        "format": "text",
+        "content": content,
+    }
+
+
+def jupyter_notebook(name, path, source):
+    return {
+        "type": "notebook",
+        "name": name,
+        "path": path,
+        "format": "json",
+        "content": {
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": source,
+                }
+            ],
+            "metadata": {},
+            "nbformat": 4,
+            "nbformat_minor": 5,
+        },
+    }
+
+
+def shared_lib(path):
+    return jupyter_dir(
+        "lib",
+        path,
+        [
+            jupyter_file("__init__.py", "{}/__init__.py".format(path), ""),
+            jupyter_file("tools.py", "{}/tools.py".format(path), "def run():\n    return 'ok'\n"),
+            jupyter_file("sbx_tools.py", "{}/sbx_tools.py".format(path), "VALUE = 'sandbox'\n"),
+            jupyter_file(
+                "utils.py",
+                "{}/utils.py".format(path),
+                "def read_tools():\n"
+                "    with open(\"lib/sbx_tools.py\", \"r\") as handle:\n"
+                "        return handle.read()\n",
+            ),
+        ],
+    )
+
+
 def test_parse_tree_url_to_contents_api_preserves_token_query():
     location = parse_jupyter_contents_location(
         "https://lab.example.test/tree/course/notebooks?token=abc"
@@ -573,3 +634,162 @@ def test_downloader_treats_api_timeout_as_recoverable_jupyter_auth_error(tmp_pat
 
     assert summary.failed == 1
     assert "live lab session" in summary.errors[0]
+
+
+def test_downloader_deduplicates_identical_nested_lib_and_rewrites_references(tmp_path):
+    responses = {
+        "https://lab.example.test/api/contents/course": jupyter_dir(
+            "course",
+            "course",
+            [
+                shared_lib("course/lib"),
+                jupyter_dir(
+                    "L2",
+                    "course/L2",
+                    [
+                        shared_lib("course/L2/lib"),
+                        jupyter_file(
+                            "demo.py",
+                            "course/L2/demo.py",
+                            "from lib.tools import run\nVALUE = run()\n",
+                        ),
+                        jupyter_notebook(
+                            "L2.ipynb",
+                            "course/L2/L2.ipynb",
+                            "from lib.tools import run\nrun()",
+                        ),
+                    ],
+                ),
+            ],
+        )
+    }
+
+    summary = JupyterCodeDownloader(
+        FakeJupyterClient(responses),
+        tmp_path,
+        "course-slug",
+    ).download("https://lab.example.test/tree/course")
+
+    code_dir = tmp_path / "course-slug" / "code" / "lessons"
+    assert (code_dir / "lib" / "tools.py").exists()
+    assert not (code_dir / "L2" / "lib").exists()
+
+    demo = (code_dir / "L2" / "demo.py").read_text(encoding="utf-8")
+    assert "_DLAI_SHARED_CODE_ROOT = Path(__file__).resolve().parents[1]" in demo
+    assert demo.index("_DLAI_SHARED_CODE_ROOT") < demo.index("from lib.tools import run")
+
+    notebook = json.loads((code_dir / "L2" / "L2.ipynb").read_text(encoding="utf-8"))
+    assert "_DLAI_SHARED_CODE_ROOT = Path.cwd().resolve().parents[0]" in notebook["cells"][0]["source"]
+    assert "from lib.tools import run" in notebook["cells"][1]["source"]
+
+    utils = (code_dir / "lib" / "utils.py").read_text(encoding="utf-8")
+    assert 'open(Path(__file__).resolve().parent / "sbx_tools.py", "r")' in utils
+
+    assert summary.saved == 6
+    assert summary.deduplicated == 4
+    assert summary.rewritten == 3
+    assert len([file for file in summary.files if file.status == "deduplicated"]) == 4
+
+
+def test_downloader_promotes_first_identical_nested_folder_when_root_is_missing(tmp_path):
+    responses = {
+        "https://lab.example.test/api/contents/course": jupyter_dir(
+            "course",
+            "course",
+            [
+                jupyter_dir(
+                    "L2",
+                    "course/L2",
+                    [
+                        jupyter_dir(
+                            "lib",
+                            "course/L2/lib",
+                            [jupyter_file("__init__.py", "course/L2/lib/__init__.py", "VALUE = 1\n")],
+                        ),
+                        jupyter_file(
+                            "demo.py",
+                            "course/L2/demo.py",
+                            "from lib import VALUE\n",
+                        ),
+                    ],
+                ),
+                jupyter_dir(
+                    "L3",
+                    "course/L3",
+                    [
+                        jupyter_dir(
+                            "lib",
+                            "course/L3/lib",
+                            [jupyter_file("__init__.py", "course/L3/lib/__init__.py", "VALUE = 1\n")],
+                        ),
+                        jupyter_file(
+                            "demo.py",
+                            "course/L3/demo.py",
+                            "from lib import VALUE\n",
+                        ),
+                    ],
+                ),
+            ],
+        )
+    }
+
+    summary = JupyterCodeDownloader(
+        FakeJupyterClient(responses),
+        tmp_path,
+        "course-slug",
+    ).download("https://lab.example.test/tree/course")
+
+    code_dir = tmp_path / "course-slug" / "code" / "lessons"
+    assert (code_dir / "lib" / "__init__.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert not (code_dir / "L2" / "lib").exists()
+    assert not (code_dir / "L3" / "lib").exists()
+    assert "Path(__file__).resolve().parents[1]" in (code_dir / "L2" / "demo.py").read_text(
+        encoding="utf-8"
+    )
+    assert "Path(__file__).resolve().parents[1]" in (code_dir / "L3" / "demo.py").read_text(
+        encoding="utf-8"
+    )
+    assert summary.saved == 3
+    assert summary.deduplicated == 1
+    assert summary.rewritten == 2
+    assert any(file.path == "lessons/lib/__init__.py" for file in summary.files)
+
+
+def test_downloader_keeps_same_name_folders_when_contents_differ(tmp_path):
+    responses = {
+        "https://lab.example.test/api/contents/course": jupyter_dir(
+            "course",
+            "course",
+            [
+                jupyter_dir(
+                    "lib",
+                    "course/lib",
+                    [jupyter_file("tool.py", "course/lib/tool.py", "VALUE = 'root'\n")],
+                ),
+                jupyter_dir(
+                    "L2",
+                    "course/L2",
+                    [
+                        jupyter_dir(
+                            "lib",
+                            "course/L2/lib",
+                            [jupyter_file("tool.py", "course/L2/lib/tool.py", "VALUE = 'lesson'\n")],
+                        )
+                    ],
+                ),
+            ],
+        )
+    }
+
+    summary = JupyterCodeDownloader(
+        FakeJupyterClient(responses),
+        tmp_path,
+        "course-slug",
+    ).download("https://lab.example.test/tree/course")
+
+    code_dir = tmp_path / "course-slug" / "code" / "lessons"
+    assert (code_dir / "lib" / "tool.py").exists()
+    assert (code_dir / "L2" / "lib" / "tool.py").exists()
+    assert summary.saved == 2
+    assert summary.deduplicated == 0
+    assert summary.rewritten == 0

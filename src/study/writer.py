@@ -219,6 +219,15 @@ def _format_lesson_metadata(kind, duration):
 
 def _format_code_assets_section(code_assets):
     label = _relative_path_label(code_assets.output_dir)
+    counts = [
+        "Saved: {}".format(code_assets.saved),
+        "Skipped: {}".format(code_assets.skipped),
+        "Failed: {}".format(code_assets.failed),
+    ]
+    if code_assets.deduplicated:
+        counts.append("Deduplicated: {}".format(code_assets.deduplicated))
+    if code_assets.rewritten:
+        counts.append("Rewritten: {}".format(code_assets.rewritten))
     lines = [
         "## Code",
         "",
@@ -227,13 +236,7 @@ def _format_code_assets_section(code_assets):
         "- Directory: [{}]({}/)".format(label, label),
     ]
     lines.extend(_format_code_asset_groups(code_assets))
-    lines.append(
-        "- Saved: {}  Skipped: {}  Failed: {}".format(
-            code_assets.saved,
-            code_assets.skipped,
-            code_assets.failed,
-        )
-    )
+    lines.append("- {}".format("  ".join(counts)))
     lines.extend("- Error: {}".format(_redact_url(error)) for error in code_assets.errors)
     lines.append("")
     return lines
@@ -256,6 +259,8 @@ def _code_assets_payload(course_dir, code_assets):
         "saved": code_assets.saved,
         "skipped": code_assets.skipped,
         "failed": code_assets.failed,
+        "deduplicated": code_assets.deduplicated,
+        "rewritten": code_assets.rewritten,
         "errors": [_redact_url(error) for error in code_assets.errors],
         "files": [
             {

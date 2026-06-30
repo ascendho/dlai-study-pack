@@ -1,6 +1,7 @@
 import base64
 import json
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import List
@@ -32,6 +33,7 @@ SKIP_FILE_NAMES = {
 CODE_GROUP_LESSONS = "lessons"
 CODE_GROUP_PROJECT = "project"
 CODE_GROUPS = {CODE_GROUP_LESSONS, CODE_GROUP_PROJECT}
+_SHARED_CODE_MARKER = "_DLAI_SHARED_CODE_ROOT"
 
 
 class CodeDownloadError(RuntimeError):
@@ -53,6 +55,8 @@ class CodeAssetSummary:
     saved: int = 0
     skipped: int = 0
     failed: int = 0
+    deduplicated: int = 0
+    rewritten: int = 0
     files: List[CodeAssetFile] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
@@ -146,6 +150,8 @@ class JupyterCodeDownloader:
                 summary.failed += 1
                 summary.errors.append(redact_url(str(exc)))
 
+        if summary.saved or summary.skipped:
+            _deduplicate_code_groups(summary)
         return summary
 
     def _download_sources(self, code_url, discovered_links):
@@ -300,6 +306,301 @@ class JupyterCodeDownloader:
                 bytes=len(data),
             )
         )
+
+
+def _deduplicate_code_groups(summary):
+    for group in CODE_GROUPS:
+        group_dir = summary.output_dir / group
+        if not group_dir.is_dir():
+            continue
+        _deduplicate_group(summary, group, group_dir)
+
+
+def _deduplicate_group(summary, group, group_dir):
+    directories_by_name = {}
+    for directory in sorted(group_dir.rglob("*")):
+        if not directory.is_dir():
+            continue
+        directories_by_name.setdefault(directory.name, []).append(directory)
+
+    for name, directories in sorted(directories_by_name.items()):
+        if len(directories) < 2:
+            continue
+        signatures = {}
+        for directory in directories:
+            signature = _directory_signature(directory)
+            if signature:
+                signatures.setdefault(signature, []).append(directory)
+
+        for matching_directories in signatures.values():
+            matching_directories = [directory for directory in matching_directories if directory.exists()]
+            if len(matching_directories) < 2:
+                continue
+            _deduplicate_matching_directories(summary, group, group_dir, name, matching_directories)
+
+
+def _deduplicate_matching_directories(summary, group, group_dir, name, directories):
+    directories = sorted(directories, key=lambda path: path.relative_to(group_dir).as_posix())
+    root_candidate = group_dir / name
+    promoted_from = None
+
+    if root_candidate in directories:
+        canonical_dir = root_candidate
+    else:
+        promoted_from = directories[0]
+        canonical_dir = root_candidate
+        if canonical_dir.exists():
+            return
+        canonical_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(promoted_from), str(canonical_dir))
+        _promote_summary_entries(summary, group, promoted_from, canonical_dir, group_dir)
+
+    removed_dirs = [directory for directory in directories if directory != canonical_dir]
+    if promoted_from is not None:
+        removed_dirs = [directory for directory in removed_dirs if directory != promoted_from]
+        removed_dirs.insert(0, promoted_from)
+
+    for duplicate_dir in removed_dirs:
+        _rewrite_references_for_removed_directory(summary, duplicate_dir, canonical_dir, group_dir)
+        if duplicate_dir.exists():
+            _mark_deduplicated_entries(summary, group, duplicate_dir, canonical_dir, group_dir)
+            shutil.rmtree(duplicate_dir)
+
+    summary.rewritten += _rewrite_canonical_self_references(canonical_dir, name)
+
+
+def _directory_signature(directory):
+    signature = []
+    for child in sorted(directory.rglob("*")):
+        relative_path = child.relative_to(directory).as_posix()
+        if child.is_dir():
+            signature.append(("dir", relative_path, b""))
+            continue
+        if child.is_file():
+            signature.append(("file", relative_path, child.read_bytes()))
+    return tuple(signature)
+
+
+def _promote_summary_entries(summary, group, old_dir, new_dir, group_dir):
+    old_prefix = _summary_prefix(group, old_dir, group_dir)
+    new_prefix = _summary_prefix(group, new_dir, group_dir)
+    for file in summary.files:
+        if file.path == old_prefix or file.path.startswith(old_prefix + "/"):
+            file.path = new_prefix + file.path[len(old_prefix) :]
+            if file.message:
+                file.message = file.message.replace(old_prefix, new_prefix)
+
+
+def _mark_deduplicated_entries(summary, group, duplicate_dir, canonical_dir, group_dir):
+    duplicate_prefix = _summary_prefix(group, duplicate_dir, group_dir)
+    canonical_prefix = _summary_prefix(group, canonical_dir, group_dir)
+    seen = set()
+
+    for file in summary.files:
+        if not (file.path == duplicate_prefix or file.path.startswith(duplicate_prefix + "/")):
+            continue
+        seen.add(file.path)
+        if file.status == "saved":
+            summary.saved -= 1
+        elif file.status == "skipped":
+            summary.skipped -= 1
+        file.status = "deduplicated"
+        file.bytes = 0
+        file.message = "deduplicated into {}{}".format(
+            canonical_prefix,
+            file.path[len(duplicate_prefix) :],
+        )
+        summary.deduplicated += 1
+
+    for child in sorted(duplicate_dir.rglob("*")):
+        if not child.is_file():
+            continue
+        asset_path = "{}/{}".format(group, child.relative_to(group_dir).as_posix())
+        if asset_path in seen:
+            continue
+        target = "{}{}".format(canonical_prefix, asset_path[len(duplicate_prefix) :])
+        summary.files.append(CodeAssetFile(asset_path, "deduplicated", message="deduplicated into {}".format(target)))
+        summary.deduplicated += 1
+
+
+def _rewrite_references_for_removed_directory(summary, removed_dir, canonical_dir, group_dir):
+    affected_root = removed_dir.parent
+    folder_name = canonical_dir.name
+    rewritten = 0
+    for path in sorted(affected_root.rglob("*")):
+        if not path.is_file() or _is_relative_to(path, removed_dir):
+            continue
+        if path.suffix == ".py":
+            rewritten += _rewrite_python_imports(path, group_dir, folder_name)
+        elif path.suffix == ".ipynb":
+            rewritten += _rewrite_notebook_imports(path, group_dir, folder_name)
+    summary.rewritten += rewritten
+
+
+def _rewrite_python_imports(path, group_dir, folder_name):
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return 0
+    if _SHARED_CODE_MARKER in text or not _imports_folder(text, folder_name):
+        return 0
+
+    bootstrap = _python_shared_path_bootstrap(_python_code_root_expression(path, group_dir))
+    lines = text.splitlines(keepends=True)
+    insert_at = _first_folder_import_line(lines, folder_name)
+    if insert_at is None:
+        return 0
+    lines.insert(insert_at, bootstrap)
+    path.write_text("".join(lines), encoding="utf-8")
+    return 1
+
+
+def _rewrite_notebook_imports(path, group_dir, folder_name):
+    try:
+        notebook = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return 0
+    cells = notebook.get("cells")
+    if not isinstance(cells, list):
+        return 0
+    if any(_SHARED_CODE_MARKER in _cell_source_text(cell) for cell in cells):
+        return 0
+
+    for index, cell in enumerate(cells):
+        if cell.get("cell_type") != "code":
+            continue
+        if not _imports_folder(_cell_source_text(cell), folder_name):
+            continue
+        cells.insert(
+            index,
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "id": "dlai-shared-code-path",
+                "metadata": {},
+                "outputs": [],
+                "source": _notebook_shared_path_bootstrap(
+                    _notebook_code_root_expression(path, group_dir)
+                ),
+            },
+        )
+        path.write_text(json.dumps(notebook, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        return 1
+    return 0
+
+
+def _rewrite_canonical_self_references(canonical_dir, folder_name):
+    rewritten = 0
+    pattern = re.compile(r"open\((['\"]){}\/([^'\"]+)\1".format(re.escape(folder_name)))
+    for path in sorted(canonical_dir.rglob("*.py")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+
+        def replace(match):
+            return 'open(Path(__file__).resolve().parent / "{}"'.format(match.group(2))
+
+        new_text = pattern.sub(replace, text)
+        if new_text == text:
+            continue
+        new_text = _ensure_path_import(new_text)
+        path.write_text(new_text, encoding="utf-8")
+        rewritten += 1
+    return rewritten
+
+
+def _imports_folder(text, folder_name):
+    pattern = re.compile(
+        r"^\s*(?:from\s+{0}(?:\.|\s+import\b)|import\s+{0}(?:\.|\s|,|$))".format(
+            re.escape(folder_name)
+        ),
+        re.MULTILINE,
+    )
+    return bool(pattern.search(text))
+
+
+def _first_folder_import_line(lines, folder_name):
+    pattern = re.compile(
+        r"^\s*(?:from\s+{0}(?:\.|\s+import\b)|import\s+{0}(?:\.|\s|,|$))".format(
+            re.escape(folder_name)
+        )
+    )
+    for index, line in enumerate(lines):
+        if pattern.search(line):
+            return index
+    return None
+
+
+def _python_shared_path_bootstrap(root_expression):
+    return (
+        "import sys\n"
+        "from pathlib import Path\n\n"
+        "{marker} = {root_expression}\n"
+        "if str({marker}) not in sys.path:\n"
+        "    sys.path.insert(0, str({marker}))\n\n"
+    ).format(marker=_SHARED_CODE_MARKER, root_expression=root_expression)
+
+
+def _notebook_shared_path_bootstrap(root_expression):
+    return (
+        "import sys\n"
+        "from pathlib import Path\n\n"
+        "{marker} = {root_expression}\n"
+        "if str({marker}) not in sys.path:\n"
+        "    sys.path.insert(0, str({marker}))"
+    ).format(marker=_SHARED_CODE_MARKER, root_expression=root_expression)
+
+
+def _python_code_root_expression(path, group_dir):
+    depth = len(path.parent.relative_to(group_dir).parts)
+    return "Path(__file__).resolve().parents[{}]".format(depth)
+
+
+def _notebook_code_root_expression(path, group_dir):
+    depth = len(path.parent.relative_to(group_dir).parts)
+    if depth <= 0:
+        return "Path.cwd().resolve()"
+    return "Path.cwd().resolve().parents[{}]".format(depth - 1)
+
+
+def _ensure_path_import(text):
+    if re.search(r"^from\s+pathlib\s+import\s+.*\bPath\b", text, re.MULTILINE):
+        return text
+    lines = text.splitlines(keepends=True)
+    lines.insert(_python_import_insert_index(lines), "from pathlib import Path\n")
+    return "".join(lines)
+
+
+def _python_import_insert_index(lines):
+    index = 0
+    if lines and lines[0].startswith("#!"):
+        index = 1
+    if len(lines) > index and re.match(r"#.*coding[:=]\s*[-\w.]+", lines[index]):
+        index += 1
+    while index < len(lines) and lines[index].startswith("from __future__ import "):
+        index += 1
+    return index
+
+
+def _cell_source_text(cell):
+    source = cell.get("source", "")
+    if isinstance(source, list):
+        return "".join(source)
+    return str(source)
+
+
+def _summary_prefix(group, directory, group_dir):
+    relative = directory.relative_to(group_dir).as_posix()
+    return "{}/{}".format(group, relative) if relative != "." else group
+
+
+def _is_relative_to(path, base):
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
 
 
 def parse_jupyter_contents_location(url):

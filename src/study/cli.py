@@ -67,14 +67,17 @@ def main(argv=None):
         print("{}: {}".format(label.title(), path))
     if crawler.code_assets_summary is not None:
         code_assets = crawler.code_assets_summary
+        code_counts = [
+            "Saved: {}".format(code_assets.saved),
+            "Skipped: {}".format(code_assets.skipped),
+            "Failed: {}".format(code_assets.failed),
+        ]
+        if code_assets.deduplicated:
+            code_counts.append("Deduplicated: {}".format(code_assets.deduplicated))
+        if code_assets.rewritten:
+            code_counts.append("Rewritten: {}".format(code_assets.rewritten))
         print("Code: {}".format(code_assets.output_dir))
-        print(
-            "Code Saved: {}  Skipped: {}  Failed: {}".format(
-                code_assets.saved,
-                code_assets.skipped,
-                code_assets.failed,
-            )
-        )
+        print("Code {}".format("  ".join(code_counts)))
         for error in code_assets.errors:
             print("Code Failed: {}".format(error))
     print(
