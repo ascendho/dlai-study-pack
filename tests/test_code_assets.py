@@ -111,6 +111,20 @@ def shared_lib(path):
     )
 
 
+def write_rewritten_shared_lib(path):
+    path.mkdir(parents=True)
+    (path / "__init__.py").write_text("", encoding="utf-8")
+    (path / "tools.py").write_text("def run():\n    return 'ok'\n", encoding="utf-8")
+    (path / "sbx_tools.py").write_text("VALUE = 'sandbox'\n", encoding="utf-8")
+    (path / "utils.py").write_text(
+        "from pathlib import Path\n\n"
+        "def read_tools():\n"
+        "    with open(Path(__file__).resolve().parent / \"sbx_tools.py\", \"r\") as handle:\n"
+        "        return handle.read()\n",
+        encoding="utf-8",
+    )
+
+
 def test_parse_tree_url_to_contents_api_preserves_token_query():
     location = parse_jupyter_contents_location(
         "https://lab.example.test/tree/course/notebooks?token=abc"
@@ -180,6 +194,75 @@ def test_extract_jupyter_lab_links_from_lesson_iframe():
     assert links[0].token == "secret-token"
     assert links[0].lesson_url == "https://learn.example.test/lesson"
     assert links[0].group == "lessons"
+
+
+def test_extract_jupyter_lab_links_accepts_iframe_without_token():
+    html = """
+    <html>
+      <body>
+        <iframe
+          src="https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/notebooks/project.ipynb">
+        </iframe>
+      </body>
+    </html>
+    """
+
+    links = extract_jupyter_lab_links(
+        html,
+        lesson_url="https://learn.example.test/project",
+        group="project",
+    )
+
+    assert len(links) == 1
+    assert links[0].url == "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/tree"
+    assert links[0].token == ""
+    assert links[0].lesson_url == "https://learn.example.test/project"
+    assert links[0].group == "project"
+
+
+def test_extract_jupyter_lab_links_from_anchor_href():
+    html = """
+    <html>
+      <body>
+        <a href="https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/lab/tree/project">
+          Open project lab
+        </a>
+      </body>
+    </html>
+    """
+
+    links = extract_jupyter_lab_links(html, group="project")
+
+    assert len(links) == 1
+    assert links[0].url == "https://s172-29-2-142p8888.lab-aws-production.deeplearning.ai/tree"
+    assert links[0].token == ""
+    assert links[0].group == "project"
+
+
+def test_extract_jupyter_lab_links_from_project_lab_tree_iframe():
+    html = """
+    <html>
+      <body>
+        <iframe
+          title="Laboratory notebook"
+          src="https://s172-29-64-174p8888.lab-aws-production.deeplearning.ai/lab/tree/project.ipynb?token=project-token">
+        </iframe>
+      </body>
+    </html>
+    """
+
+    links = extract_jupyter_lab_links(
+        html,
+        lesson_url="https://learn.example.test/project",
+        group="project",
+    )
+
+    assert len(links) == 1
+    assert links[0].url == (
+        "https://s172-29-64-174p8888.lab-aws-production.deeplearning.ai/tree?token=project-token"
+    )
+    assert links[0].token == "project-token"
+    assert links[0].group == "project"
 
 
 def test_redact_url_removes_token_values():
@@ -358,6 +441,58 @@ def test_downloader_saves_project_links_under_project_group(tmp_path):
     ) == "print('project')\n"
     assert summary.saved == 1
     assert summary.files[0].path == "project/app.py"
+
+
+def test_downloader_saves_lesson_and_project_discovered_links(tmp_path):
+    responses = {
+        "https://lesson-lab.example.test/api/contents": jupyter_dir(
+            "",
+            "",
+            [
+                jupyter_file(
+                    "lesson.py",
+                    "lesson.py",
+                    "print('lesson')\n",
+                )
+            ],
+        ),
+        "https://project-lab.example.test/api/contents": jupyter_dir(
+            "",
+            "",
+            [
+                jupyter_file(
+                    "project.py",
+                    "project.py",
+                    "print('project')\n",
+                )
+            ],
+        ),
+    }
+    links = [
+        JupyterLabLink("https://lesson-lab.example.test/tree", group="lessons"),
+        JupyterLabLink("https://project-lab.example.test/tree", group="project"),
+    ]
+
+    summary = JupyterCodeDownloader(
+        FakeJupyterClient(responses),
+        tmp_path,
+        "course-slug",
+    ).download(
+        "https://manual-lab.example.test/tree",
+        discovered_links=links,
+    )
+
+    assert (tmp_path / "course-slug" / "code" / "lessons" / "lesson.py").read_text(
+        encoding="utf-8"
+    ) == "print('lesson')\n"
+    assert (tmp_path / "course-slug" / "code" / "project" / "project.py").read_text(
+        encoding="utf-8"
+    ) == "print('project')\n"
+    assert summary.saved == 2
+    assert [file.path for file in summary.files] == [
+        "lessons/lesson.py",
+        "project/project.py",
+    ]
 
 
 def test_downloader_rejects_unsafe_paths(tmp_path):
@@ -689,6 +824,42 @@ def test_downloader_deduplicates_identical_nested_lib_and_rewrites_references(tm
     assert summary.deduplicated == 4
     assert summary.rewritten == 3
     assert len([file for file in summary.files if file.status == "deduplicated"]) == 4
+
+
+def test_downloader_deduplicates_against_previously_rewritten_shared_lib(tmp_path):
+    code_dir = tmp_path / "course-slug" / "code" / "lessons"
+    write_rewritten_shared_lib(code_dir / "lib")
+    responses = {
+        "https://lab.example.test/api/contents/course": jupyter_dir(
+            "course",
+            "course",
+            [
+                shared_lib("course/lib"),
+                jupyter_dir(
+                    "L2",
+                    "course/L2",
+                    [
+                        shared_lib("course/L2/lib"),
+                    ],
+                ),
+            ],
+        )
+    }
+
+    summary = JupyterCodeDownloader(
+        FakeJupyterClient(responses),
+        tmp_path,
+        "course-slug",
+    ).download("https://lab.example.test/tree/course")
+
+    assert (code_dir / "lib" / "tools.py").exists()
+    assert not (code_dir / "L2" / "lib").exists()
+    assert 'Path(__file__).resolve().parent / "sbx_tools.py"' in (
+        code_dir / "lib" / "utils.py"
+    ).read_text(encoding="utf-8")
+    assert summary.saved == 0
+    assert summary.skipped == 4
+    assert summary.deduplicated == 4
 
 
 def test_downloader_promotes_first_identical_nested_folder_when_root_is_missing(tmp_path):

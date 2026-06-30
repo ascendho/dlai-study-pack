@@ -377,8 +377,34 @@ def _directory_signature(directory):
             signature.append(("dir", relative_path, b""))
             continue
         if child.is_file():
-            signature.append(("file", relative_path, child.read_bytes()))
+            signature.append(("file", relative_path, _signature_file_bytes(child, directory.name)))
     return tuple(signature)
+
+
+def _signature_file_bytes(path, folder_name):
+    data = path.read_bytes()
+    if path.suffix != ".py":
+        return data
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+    return _normalize_self_references_for_signature(text, folder_name).encode("utf-8")
+
+
+def _normalize_self_references_for_signature(text, folder_name):
+    placeholder = "__DLAI_SHARED_FOLDER__"
+    folder_pattern = re.compile(r"open\((['\"]){}\/([^'\"]+)\1".format(re.escape(folder_name)))
+    module_pattern = re.compile(
+        r"open\(Path\(__file__\)\.resolve\(\)\.parent\s*/\s*(['\"])([^'\"]+)\1"
+    )
+    had_module_reference = bool(module_pattern.search(text))
+    text = folder_pattern.sub(lambda match: 'open("{}/{}"'.format(placeholder, match.group(2)), text)
+    text = module_pattern.sub(lambda match: 'open("{}/{}"'.format(placeholder, match.group(2)), text)
+    without_path_import = re.sub(r"^from pathlib import Path\r?\n(?:\r?\n)?", "", text, count=1, flags=re.MULTILINE)
+    if had_module_reference and "Path" not in without_path_import:
+        text = without_path_import
+    return text
 
 
 def _promote_summary_entries(summary, group, old_dir, new_dir, group_dir):
@@ -642,14 +668,11 @@ def extract_jupyter_lab_links(html, lesson_url="", group=CODE_GROUP_LESSONS):
     seen = set()
     group = _normalize_code_group(group)
 
-    for iframe in soup.find_all("iframe", src=True):
-        src = iframe["src"]
-        if "lab-aws-production.deeplearning.ai" not in src:
+    for lab_url in _jupyter_lab_urls(soup):
+        if "lab-aws-production.deeplearning.ai" not in lab_url:
             continue
-        token = _token_from_url(src)
-        if not token:
-            continue
-        tree_url = jupyter_tree_url_from_iframe_src(src)
+        token = _token_from_url(lab_url)
+        tree_url = jupyter_tree_url_from_iframe_src(lab_url)
         key = (redact_url(tree_url), token)
         if key in seen:
             continue
@@ -657,6 +680,13 @@ def extract_jupyter_lab_links(html, lesson_url="", group=CODE_GROUP_LESSONS):
         links.append(JupyterLabLink(tree_url, token=token, lesson_url=lesson_url, group=group))
 
     return links
+
+
+def _jupyter_lab_urls(soup):
+    for iframe in soup.find_all("iframe", src=True):
+        yield iframe["src"]
+    for anchor in soup.find_all("a", href=True):
+        yield anchor["href"]
 
 
 def jupyter_tree_url_from_iframe_src(src):
