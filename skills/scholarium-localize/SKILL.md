@@ -1,9 +1,9 @@
 ---
-name: dlai-localize-study-pack
-description: Use when Codex should directly localize exported DeepLearning.AI study-pack materials into Simplified Chinese, including translating transcript and Markdown files while preserving English originals, translating English code comments/docstrings, preserving executable code, and validating localized Python/notebook outputs. Trigger for requests such as "translate exports into Chinese", "localize this DLAI course", or "translate code comments and transcripts".
+name: scholarium-localize
+description: Use when Codex should directly localize Scholarium exports into Simplified Chinese, including translating transcript and Markdown files while preserving English originals, translating English code comments/docstrings, preserving executable code, and validating localized Python/notebook outputs. Trigger for requests such as "translate exports into Chinese", "localize this DeepLearning.AI course", or "translate code comments and transcripts".
 ---
 
-# DLAI Study Pack Localization
+# Scholarium Localization
 
 Use the current Codex model to translate the files directly. Do not ask the
 user for a separate translation command, do not call an external translation
@@ -14,9 +14,9 @@ CLI, and do not create fake placeholder translations.
 1. Identify the export directory, usually `exports/<course-slug>/`.
 2. Prepare deterministic translation chunks:
    ```sh
-   python skills/dlai-localize-study-pack/scripts/localize_pack.py prepare exports/<course-slug>
+   python skills/scholarium-localize/scripts/localize_pack.py prepare exports/<course-slug>
    ```
-3. Translate each JSON file under `exports/<course-slug>/zh/.dlai-localize/pending/` with the current Codex model. For every pending `chunk-0001.json`, write `exports/<course-slug>/zh/.dlai-localize/translated/chunk-0001.json` with the same `chunk_id` and item `id` values:
+3. Translate each JSON file under `exports/<course-slug>/zh/.scholarium-localize/pending/` with the current Codex model. For every pending `chunk-0001.json`, write `exports/<course-slug>/zh/.scholarium-localize/translated/chunk-0001.json` with the same `chunk_id` and item `id` values:
    ```json
    {
      "chunk_id": "chunk-0001",
@@ -27,18 +27,18 @@ CLI, and do not create fake placeholder translations.
    ```
 4. Apply translated chunks and validate:
    ```sh
-   python skills/dlai-localize-study-pack/scripts/localize_pack.py apply exports/<course-slug>
-   python skills/dlai-localize-study-pack/scripts/localize_pack.py validate exports/<course-slug>
+   python skills/scholarium-localize/scripts/localize_pack.py apply exports/<course-slug>
+   python skills/scholarium-localize/scripts/localize_pack.py validate exports/<course-slug>
    ```
 5. Preserve the original export. Never write localized content back into the English source files.
 
-The helper copies non-translated assets, stores state under `zh/.dlai-localize/`, supports resume, and skips unchanged files after a successful apply. When the user explicitly asks for faster or parallel execution, split different pending chunk files across agents and merge their translated JSON files before running `apply`.
+The helper copies non-translated assets, stores state under `zh/.scholarium-localize/`, supports resume, and skips unchanged files after a successful apply. When the user explicitly asks for faster or parallel execution, split different pending chunk files across agents and merge their translated JSON files before running `apply`.
 
 ## Translation Rules
 
 - Markdown and transcript files: write Chinese first, then keep the original English in a folded block:
   ```md
-  <!-- dlai-localized: zh-CN -->
+  <!-- scholarium-localized: zh-CN -->
 
   <Chinese translation>
 
@@ -60,7 +60,7 @@ The helper copies non-translated assets, stores state under `zh/.dlai-localize/`
 After writing localized files:
 
 ```sh
-python3 -m py_compile src/study/*.py
+python3 -m py_compile src/scholarium/*.py
 python3 -m pytest
 ```
 

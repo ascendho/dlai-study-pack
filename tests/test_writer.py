@@ -1,9 +1,9 @@
 import json
 
-from study.code_assets import CodeAssetFile, CodeAssetSummary
-from study.parser import CourseInfo, LessonInfo, ResourceLink
-from study.writer import LessonResult, write_index, write_lesson
-from study.writer import write_course_overview, write_manifest, write_resources
+from scholarium.code_assets import CodeAssetFile, CodeAssetSummary
+from scholarium.parser import CourseInfo, LessonInfo, ResourceLink
+from scholarium.writer import LessonResult, write_index, write_lesson
+from scholarium.writer import write_course_overview, write_manifest, write_resources
 
 
 def test_write_lesson_and_index(tmp_path):

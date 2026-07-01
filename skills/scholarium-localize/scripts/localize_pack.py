@@ -10,12 +10,12 @@ import tokenize
 from pathlib import Path
 
 
-LOCALIZED_MARKER = "<!-- dlai-localized: zh-CN -->"
+LOCALIZED_MARKER = "<!-- scholarium-localized: zh-CN -->"
 STATE_VERSION = 1
 DEFAULT_MAX_ITEMS = 20
 DEFAULT_MAX_CHARS = 12000
 TARGET_LANGUAGE = "zh-CN"
-STATE_DIRNAME = ".dlai-localize"
+STATE_DIRNAME = ".scholarium-localize"
 
 
 class LocalizeError(RuntimeError):
@@ -614,7 +614,7 @@ def _set_cell_source(cell, text):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Prepare/apply/validate DLAI study-pack localization.")
+    parser = argparse.ArgumentParser(description="Prepare/apply/validate Scholarium localization.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prepare = subparsers.add_parser("prepare", help="Scan an export and create translation chunks.")

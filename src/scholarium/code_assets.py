@@ -33,7 +33,7 @@ SKIP_FILE_NAMES = {
 CODE_GROUP_LESSONS = "lessons"
 CODE_GROUP_PROJECT = "project"
 CODE_GROUPS = {CODE_GROUP_LESSONS, CODE_GROUP_PROJECT}
-_SHARED_CODE_MARKER = "_DLAI_SHARED_CODE_ROOT"
+_SHARED_CODE_MARKER = "_SCHOLARIUM_SHARED_CODE_ROOT"
 
 
 class CodeDownloadError(RuntimeError):
@@ -393,7 +393,7 @@ def _signature_file_bytes(path, folder_name):
 
 
 def _normalize_self_references_for_signature(text, folder_name):
-    placeholder = "__DLAI_SHARED_FOLDER__"
+    placeholder = "__SCHOLARIUM_SHARED_FOLDER__"
     folder_pattern = re.compile(r"open\((['\"]){}\/([^'\"]+)\1".format(re.escape(folder_name)))
     module_pattern = re.compile(
         r"open\(Path\(__file__\)\.resolve\(\)\.parent\s*/\s*(['\"])([^'\"]+)\1"
@@ -502,7 +502,7 @@ def _rewrite_notebook_imports(path, group_dir, folder_name):
             {
                 "cell_type": "code",
                 "execution_count": None,
-                "id": "dlai-shared-code-path",
+                "id": "scholarium-shared-code-path",
                 "metadata": {},
                 "outputs": [],
                 "source": _notebook_shared_path_bootstrap(
@@ -877,7 +877,7 @@ def _jupyter_auth_message(location):
     host = urlparse(location.base_url).netloc
     return (
         "Jupyter authentication or a live lab session is required for {}. Safari cookies "
-        "are not reused by Playwright; set code_token in dlai-transcripts.json, include "
+        "are not reused by Playwright; set code_token in scholarium.json, include "
         "?token=... in code_url, or set browser_visibility to visible and log in in the "
         "opened browser.".format(host)
     )

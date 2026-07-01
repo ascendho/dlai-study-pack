@@ -10,7 +10,7 @@ from .crawler import TranscriptCrawler
 from .fetchers import MissingDependencyError
 
 
-CONFIG_PATH = Path("dlai-transcripts.json")
+CONFIG_PATH = Path("scholarium.json")
 DEFAULT_OUTPUT_ROOT = "exports"
 DEFAULT_AUTH_STATE = ".auth/deeplearning_ai.json"
 DEFAULT_BROWSER_VISIBILITY = "auto"
@@ -19,9 +19,9 @@ BROWSER_VISIBILITY_CHOICES = {"auto", "hidden", "visible"}
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog="dlai-transcripts",
-        usage="dlai-transcripts",
-        description="Extract a DeepLearning.AI course using dlai-transcripts.json.",
+        prog="scholarium",
+        usage="scholarium",
+        description="Extract a DeepLearning.AI course using scholarium.json.",
     )
     return parser
 
@@ -131,7 +131,7 @@ def load_config(config_path=CONFIG_PATH):
     path = Path(config_path)
     if not path.exists():
         raise ConfigError(
-            "{} not found. Create it with course_url before running dlai-transcripts.".format(path)
+            "{} not found. Create it with course_url before running scholarium.".format(path)
         )
     try:
         with path.open(encoding="utf-8") as handle:

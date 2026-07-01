@@ -2,7 +2,7 @@ import sys
 
 import pytest
 
-from study.cli import (
+from scholarium.cli import (
     ConfigError,
     ProgressReporter,
     build_parser,
@@ -53,7 +53,7 @@ def test_cli_rejects_removed_options():
 
 
 def test_load_settings_from_config_file(tmp_path):
-    config_path = tmp_path / "dlai-transcripts.json"
+    config_path = tmp_path / "scholarium.json"
     config_path.write_text(
         """
         {

@@ -2,7 +2,7 @@ import json
 from base64 import b64encode
 from urllib.parse import parse_qs, urlparse
 
-from study.code_assets import (
+from scholarium.code_assets import (
     extract_jupyter_lab_links,
     JupyterCodeDownloader,
     JupyterLabLink,
@@ -810,11 +810,11 @@ def test_downloader_deduplicates_identical_nested_lib_and_rewrites_references(tm
     assert not (code_dir / "L2" / "lib").exists()
 
     demo = (code_dir / "L2" / "demo.py").read_text(encoding="utf-8")
-    assert "_DLAI_SHARED_CODE_ROOT = Path(__file__).resolve().parents[1]" in demo
-    assert demo.index("_DLAI_SHARED_CODE_ROOT") < demo.index("from lib.tools import run")
+    assert "_SCHOLARIUM_SHARED_CODE_ROOT = Path(__file__).resolve().parents[1]" in demo
+    assert demo.index("_SCHOLARIUM_SHARED_CODE_ROOT") < demo.index("from lib.tools import run")
 
     notebook = json.loads((code_dir / "L2" / "L2.ipynb").read_text(encoding="utf-8"))
-    assert "_DLAI_SHARED_CODE_ROOT = Path.cwd().resolve().parents[0]" in notebook["cells"][0]["source"]
+    assert "_SCHOLARIUM_SHARED_CODE_ROOT = Path.cwd().resolve().parents[0]" in notebook["cells"][0]["source"]
     assert "from lib.tools import run" in notebook["cells"][1]["source"]
 
     utils = (code_dir / "lib" / "utils.py").read_text(encoding="utf-8")

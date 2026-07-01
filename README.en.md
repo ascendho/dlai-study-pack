@@ -1,6 +1,6 @@
 > 中文版本同样可用：[README.md](README.md)。
 
-# DeepLearning.AI Course Exporter
+# Scholarium
 
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue)
 ![Playwright](https://img.shields.io/badge/browser-Playwright-2EAD33)
@@ -9,16 +9,16 @@
 ![Config](https://img.shields.io/badge/config-JSON-informational)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-An unofficial personal study helper for organizing DeepLearning.AI course pages
-that the user is already authorized to access. This repository does not include
-or redistribute any DeepLearning.AI or Coursera course materials; local outputs
-created by users are the users' responsibility. The tool uses Playwright to
-control a local browser for pages the user is logged in to and authorized to
-access.
+Scholarium is an unofficial personal study helper for organizing
+DeepLearning.AI course pages that the user is already authorized to access.
+This repository does not include or redistribute any DeepLearning.AI or
+Coursera course materials; local outputs created by users are the users'
+responsibility. The tool uses Playwright to control a local browser for pages
+the user is logged in to and authorized to access.
 
 ## Legal and Usage Notice
 
-This is an unofficial personal study helper. It is not affiliated with,
+Scholarium is an unofficial personal study helper. It is not affiliated with,
 endorsed by, sponsored by, or officially authorized by DeepLearning.AI or
 Coursera. Users should organize only content they are authorized to access and
 are responsible for complying with DeepLearning.AI terms, Coursera terms,
@@ -56,7 +56,7 @@ python3 -m playwright install chromium
 
 ## Configuration
 
-Edit `dlai-transcripts.json` in the project root:
+Edit `scholarium.json` in the project root:
 
 ```json
 {
@@ -79,7 +79,7 @@ feature.
 ## Run
 
 ```sh
-dlai-transcripts
+scholarium
 ```
 
 The command generates a local study pack for course resources that are visible
@@ -87,6 +87,40 @@ to your authenticated browser and that you are authorized to access. No extra
 arguments are needed. The first authenticated run may open a browser window.
 Complete login in that browser, and the command will continue automatically.
 Later runs reuse the saved login state and run in the background by default.
+
+## AI Skills Post-Processing Workflow
+
+This repository includes two Codex skills for post-processing local study-pack
+exports. In normal use, you do not need to run the internal helper scripts
+directly. Ask Codex in natural language and include the skill name and export
+directory.
+
+Recommended order:
+
+1. Run `scholarium` to create `exports/<course-slug>/`.
+2. Localize the export:
+
+   ```text
+   Use the scholarium-localize skill to translate exports/<course-slug>.
+   ```
+
+   Output is written to `exports/<course-slug>/zh/`. The original English export
+   is preserved.
+
+3. Generate per-lesson study notes:
+
+   ```text
+   Use the scholarium-notes skill to generate lesson notes for exports/<course-slug>.
+   ```
+
+   Output is written to `exports/<course-slug>/notes/`, including
+   `notes/index.md`.
+
+The skills internally use helper scripts for chunking, resumability,
+unchanged-file skipping, and validation. Those scripts are implementation
+details for automation and debugging. Generated translations, notes, and code
+materials remain local personal-study outputs; do not commit them to public
+repositories or redistribute them.
 
 ## Export Structure
 
@@ -136,7 +170,7 @@ Playwright browser state needed to reuse an existing web login:
 On course code, project, or graded pages that the user is logged in to and
 authorized to access, the tool may use page-provided temporary lab access
 credentials to request related Jupyter/Lab resources. Only add
-`"code_token": "your Jupyter token"` to `dlai-transcripts.json`, or set
+`"code_token": "your Jupyter token"` to `scholarium.json`, or set
 `"browser_visibility"` to `"visible"` and run the command once, when you have
 confirmed that you are authorized to access the relevant lab and the course
 page does not provide a reusable lab entry. Do not commit or publish local
@@ -145,7 +179,7 @@ files containing tokens, login state, or exported course materials.
 ## Notes
 
 - This project is intended for personal study workflows.
-- Source code lives in `src/study/`, the import package directory for
+- Source code lives in `src/scholarium/`, the import package directory for
   the standard Python `src` layout. It is not an output directory.
 - DeepLearning.AI page structure can change; parser tests use local HTML
   fixtures to keep core behavior stable.

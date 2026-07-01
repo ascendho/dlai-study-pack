@@ -1,6 +1,6 @@
 import pytest
 
-from study.fetchers import BrowserFetcher, LoginRequiredError
+from scholarium.fetchers import BrowserFetcher, LoginRequiredError
 
 
 class DummyContext:

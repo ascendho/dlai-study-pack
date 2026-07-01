@@ -1,4 +1,4 @@
-from study.parser import (
+from scholarium.parser import (
     clean_lines,
     extract_course_info,
     extract_lesson_data,

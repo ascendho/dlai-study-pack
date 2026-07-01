@@ -1,5 +1,5 @@
-from study.crawler import _code_group_for_lesson, TranscriptCrawler
-from study.parser import CourseInfo, LessonInfo
+from scholarium.crawler import _code_group_for_lesson, TranscriptCrawler
+from scholarium.parser import CourseInfo, LessonInfo
 
 
 class FakeBrowser:

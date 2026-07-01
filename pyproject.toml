@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dlai-study-pack"
+name = "scholarium"
 version = "0.1.0"
 description = "Export DeepLearning.AI course transcripts, metadata, resources, and lab code."
 readme = "README.md"
@@ -26,7 +26,7 @@ dev = [
 ]
 
 [project.scripts]
-dlai-transcripts = "study.cli:main"
+scholarium = "scholarium.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
